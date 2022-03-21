@@ -4,6 +4,8 @@
 
 #include <cuda_runtime.h>
 
+#include "kernels.h"
+
 #define REPEAT2(x) x x
 #define REPEAT4(x) REPEAT2(x) REPEAT2(x)
 #define REPEAT8(x) REPEAT4(x) REPEAT4(x)
@@ -165,5 +167,61 @@ static void BM_PinnedHostToGPUCopy(benchmark::State& state) {
 }
 
 BENCHMARK(BM_PinnedHostToGPUCopy)->RangeMultiplier(2)->Range(1<<20, 1<<24);
+
+static void BM_GPUMemoryWrite(benchmark::State& state) {
+    const size_t size = state.range(0);
+    // Allocate GPU memory directly.
+    uint8_t* gpu_memory;
+    if (cudaMalloc(&gpu_memory, size) != cudaSuccess) {
+        state.SkipWithError("cudaMalloc failed");
+        return;
+    }
+
+    for (auto _ : state) {
+        gpuMemoryWrite(gpu_memory, size);
+        cudaDeviceSynchronize();
+    }
+
+    uint8_t* memory = static_cast<uint8_t*>(malloc(size));
+    if (cudaMemcpy(static_cast<void*>(memory), gpu_memory, size, cudaMemcpyDeviceToHost) != cudaSuccess) {
+        state.SkipWithError("DeviceToHost copy failed");
+    } else {
+        for (int i = 0; i < size; ++i) {
+            if (memory[i] != 42) {
+                state.SkipWithError("Memory not written!");
+            }
+        }
+    }
+    cudaFree(gpu_memory);
+    free(memory);
+    state.SetBytesProcessed(size * state.iterations());
+}
+
+BENCHMARK(BM_GPUMemoryWrite)->RangeMultiplier(2)->Range(1<<20, 1<<24);
+
+static void BM_GPUUnifiedMemoryWrite(benchmark::State& state) {
+    const size_t size = state.range(0);
+    // Allocate unified memory.
+    uint8_t* gpu_memory;
+    if (cudaMallocManaged(&gpu_memory, size) != cudaSuccess) {
+        state.SkipWithError("cudaMallocManaged failed");
+        return;
+    }
+
+    for (auto _ : state) {
+        gpuMemoryWrite(gpu_memory, size);
+        cudaDeviceSynchronize();
+    }
+
+    for (int i = 0; i < size; ++i) {
+        if (gpu_memory[i] != 42) {
+            state.SkipWithError("Memory not written!");
+        }
+    }
+    cudaFree(gpu_memory);
+    state.SetBytesProcessed(size * state.iterations());
+}
+
+BENCHMARK(BM_GPUUnifiedMemoryWrite)->RangeMultiplier(2)->Range(1<<20, 1<<24);
 
 BENCHMARK_MAIN();
