@@ -132,6 +132,7 @@ static void BM_PageableHostToGPUCopy(benchmark::State& state) {
     }
     free(memory);
     cudaFree(dst);
+    state.SetBytesProcessed(size * state.iterations());
 }
 
 BENCHMARK(BM_PageableHostToGPUCopy)->RangeMultiplier(2)->Range(1<<20, 1<<24);
@@ -160,6 +161,7 @@ static void BM_PinnedHostToGPUCopy(benchmark::State& state) {
     }
     cudaFreeHost(memory);
     cudaFree(dst);
+    state.SetBytesProcessed(size * state.iterations());
 }
 
 BENCHMARK(BM_PinnedHostToGPUCopy)->RangeMultiplier(2)->Range(1<<20, 1<<24);
