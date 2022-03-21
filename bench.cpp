@@ -1,4 +1,5 @@
 #include <cstdint>
+#include <iostream>
 
 #include <benchmark/benchmark.h>
 
@@ -168,7 +169,7 @@ static void BM_PinnedHostToGPUCopy(benchmark::State& state) {
 
 BENCHMARK(BM_PinnedHostToGPUCopy)->RangeMultiplier(2)->Range(1<<20, 1<<24);
 
-static void BM_GPUMemoryWrite(benchmark::State& state) {
+static void BM_GPUMemoryRead(benchmark::State& state) {
     const size_t size = state.range(0);
     // Allocate GPU memory directly.
     uint8_t* gpu_memory;
@@ -177,29 +178,36 @@ static void BM_GPUMemoryWrite(benchmark::State& state) {
         return;
     }
 
+    uint8_t* memory = static_cast<uint8_t*>(calloc(size, sizeof(uint8_t)));
+
+    cudaEvent_t start, stop;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
+        
     for (auto _ : state) {
-        gpuMemoryWrite(gpu_memory, size);
-        cudaDeviceSynchronize();
+        // Do a memcpy to force cache invalidation on the GPU side.
+        if (cudaMemcpy(gpu_memory, static_cast<void*>(memory), size, cudaMemcpyHostToDevice) != cudaSuccess) {
+            state.SkipWithError("DeviceToHost copy failed");
+        }
+
+        cudaEventRecord(start);
+        gpuMemoryRead(gpu_memory, size);
+        cudaEventRecord(stop);
+        cudaEventSynchronize(stop);
+
+        float elapsed_ms = 0;
+        cudaEventElapsedTime(&elapsed_ms, start, stop);
+        state.SetIterationTime(elapsed_ms / 1000.0);
     }
 
-    uint8_t* memory = static_cast<uint8_t*>(malloc(size));
-    if (cudaMemcpy(static_cast<void*>(memory), gpu_memory, size, cudaMemcpyDeviceToHost) != cudaSuccess) {
-        state.SkipWithError("DeviceToHost copy failed");
-    } else {
-        for (int i = 0; i < size; ++i) {
-            if (memory[i] != 42) {
-                state.SkipWithError("Memory not written!");
-            }
-        }
-    }
     cudaFree(gpu_memory);
     free(memory);
     state.SetBytesProcessed(size * state.iterations());
 }
 
-BENCHMARK(BM_GPUMemoryWrite)->RangeMultiplier(2)->Range(1<<20, 1<<24);
+BENCHMARK(BM_GPUMemoryRead)->RangeMultiplier(2)->Range(1<<20, 1<<24)->UseManualTime();
 
-static void BM_GPUUnifiedMemoryWrite(benchmark::State& state) {
+static void BM_GPUUnifiedMemoryRead(benchmark::State& state) {
     const size_t size = state.range(0);
     // Allocate unified memory.
     uint8_t* gpu_memory;
@@ -208,20 +216,32 @@ static void BM_GPUUnifiedMemoryWrite(benchmark::State& state) {
         return;
     }
 
+    cudaEvent_t start, stop;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
+        
     for (auto _ : state) {
-        gpuMemoryWrite(gpu_memory, size);
+        // Invalidate unified memory by writing to it from the host.
+        for (size_t i = 0; i < size; ++i) {
+            gpu_memory[i] = 0;
+        }
         cudaDeviceSynchronize();
+
+        cudaEventRecord(start);
+        gpuMemoryRead(gpu_memory, size);
+        cudaEventRecord(stop);
+        cudaEventSynchronize(stop);
+
+        float elapsed_ms = 0;
+        cudaEventElapsedTime(&elapsed_ms, start, stop);
+        state.SetIterationTime(elapsed_ms / 1000.0);
     }
 
-    for (int i = 0; i < size; ++i) {
-        if (gpu_memory[i] != 42) {
-            state.SkipWithError("Memory not written!");
-        }
-    }
+    cudaDeviceSynchronize();
     cudaFree(gpu_memory);
     state.SetBytesProcessed(size * state.iterations());
 }
 
-BENCHMARK(BM_GPUUnifiedMemoryWrite)->RangeMultiplier(2)->Range(1<<20, 1<<24);
+BENCHMARK(BM_GPUUnifiedMemoryRead)->RangeMultiplier(2)->Range(1<<20, 1<<24)->UseManualTime();
 
 BENCHMARK_MAIN();
