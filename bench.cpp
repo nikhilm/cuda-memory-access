@@ -14,7 +14,11 @@
 #define REPEAT32(x) REPEAT16(x) REPEAT16(x)
 #define REPEAT(x) REPEAT32(x)
 
-#define ARGS ->RangeMultiplier(2)->Range(1<<10, 1<<20)
+// navcam images with only the Y plane are 780x780 = 608400 bytes, 912600 bytes including chroma.
+// subject images can apparently be ~6mb.
+#define ARGS ->RangeMultiplier(2)->Range(1 << 19, 1 << 23)
+// Use manual timing so we can use the CUDA APIs to measure GPU time.
+#define GPU_READ_ARGS ->RangeMultiplier(2)->Range(1 << 19, 1 << 23)->UseManualTime();
 
 // Jetson Nano
 constexpr std::size_t L1_CACHE_SIZE = 32 * 1024;
@@ -38,7 +42,7 @@ static void BM_CpuPageableHostMemoryRead(benchmark::State& state) {
     state.SetItemsProcessed((p1 - p0) * state.iterations());
 }
 
-// BENCHMARK_TEMPLATE1(BM_CpuPageableHostMemoryRead, float)->RangeMultiplier(2)->Range(1<<10, 1<<20);
+// BENCHMARK_TEMPLATE1(BM_CpuPageableHostMemoryRead, float) ARGS;
 
 template <class Word>
 static void WriteToMemory(benchmark::State& state, void* memory, size_t size) {
@@ -205,7 +209,7 @@ static void BM_GPUMemoryRead(benchmark::State& state) {
     state.SetBytesProcessed(size * state.iterations());
 }
 
-BENCHMARK(BM_GPUMemoryRead)->RangeMultiplier(2)->Range(1<<20, 1<<24)->UseManualTime();
+BENCHMARK(BM_GPUMemoryRead) GPU_READ_ARGS;
 
 static void BM_GPUUnifiedMemoryRead(benchmark::State& state) {
     const size_t size = state.range(0);
@@ -242,7 +246,7 @@ static void BM_GPUUnifiedMemoryRead(benchmark::State& state) {
     state.SetBytesProcessed(size * state.iterations());
 }
 
-BENCHMARK(BM_GPUUnifiedMemoryRead)->RangeMultiplier(2)->Range(1<<20, 1<<24)->UseManualTime();
+BENCHMARK(BM_GPUUnifiedMemoryRead) GPU_READ_ARGS;
 
 static void BM_GPUUnifiedMemoryPrefetchRead(benchmark::State& state) {
     const size_t size = state.range(0);
@@ -288,6 +292,6 @@ static void BM_GPUUnifiedMemoryPrefetchRead(benchmark::State& state) {
     state.SetBytesProcessed(size * state.iterations());
 }
 
-BENCHMARK(BM_GPUUnifiedMemoryPrefetchRead)->RangeMultiplier(2)->Range(1<<20, 1<<24)->UseManualTime();
+BENCHMARK(BM_GPUUnifiedMemoryPrefetchRead) GPU_READ_ARGS;
 
 BENCHMARK_MAIN();
