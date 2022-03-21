@@ -113,4 +113,55 @@ BENCHMARK_TEMPLATE1(BM_UnifiedMemoryWrite, uint8_t) ARGS;
 BENCHMARK_TEMPLATE1(BM_UnifiedMemoryWrite, float) ARGS;
 BENCHMARK_TEMPLATE1(BM_UnifiedMemoryWrite, double) ARGS;
 
+static void BM_PageableHostToGPUCopy(benchmark::State& state) {
+    const size_t size = state.range(0);
+    void* memory = malloc(size);
+    void* dst;
+    if (cudaMalloc(&dst, size) != cudaSuccess) {
+        state.SkipWithError("Device memory allocation failed");
+        free(memory);
+        return;
+    }
+
+    for (auto _ : state) {
+        if (cudaMemcpy(dst, memory, size, cudaMemcpyHostToDevice) != cudaSuccess) {
+            state.SkipWithError("cudaMemcpy failed");
+            break;
+        }
+        benchmark::ClobberMemory();
+    }
+    free(memory);
+    cudaFree(dst);
+}
+
+BENCHMARK(BM_PageableHostToGPUCopy)->RangeMultiplier(2)->Range(1<<20, 1<<24);
+
+static void BM_PinnedHostToGPUCopy(benchmark::State& state) {
+    const size_t size = state.range(0);
+    void* memory;
+    if (cudaMallocHost(&memory, size) != cudaSuccess) {
+        state.SkipWithError("Host memory allocation failed");
+        return;
+    }
+
+    void* dst;
+    if (cudaMalloc(&dst, size) != cudaSuccess) {
+        state.SkipWithError("Device memory allocation failed");
+        free(memory);
+        return;
+    }
+
+    for (auto _ : state) {
+        if (cudaMemcpy(dst, memory, size, cudaMemcpyHostToDevice) != cudaSuccess) {
+            state.SkipWithError("cudaMemcpy failed");
+            break;
+        }
+        benchmark::ClobberMemory();
+    }
+    cudaFreeHost(memory);
+    cudaFree(dst);
+}
+
+BENCHMARK(BM_PinnedHostToGPUCopy)->RangeMultiplier(2)->Range(1<<20, 1<<24);
+
 BENCHMARK_MAIN();
