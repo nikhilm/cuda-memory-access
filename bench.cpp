@@ -244,4 +244,50 @@ static void BM_GPUUnifiedMemoryRead(benchmark::State& state) {
 
 BENCHMARK(BM_GPUUnifiedMemoryRead)->RangeMultiplier(2)->Range(1<<20, 1<<24)->UseManualTime();
 
+static void BM_GPUUnifiedMemoryPrefetchRead(benchmark::State& state) {
+    const size_t size = state.range(0);
+    // Allocate unified memory.
+    uint8_t* gpu_memory;
+    if (cudaMallocManaged(&gpu_memory, size) != cudaSuccess) {
+        state.SkipWithError("cudaMallocManaged failed");
+        return;
+    }
+
+    cudaEvent_t start, stop;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
+
+    int device = -1;
+    if (cudaGetDevice(&device) != cudaSuccess) {
+        state.SkipWithError("cudaGetDevice failed");
+    }
+
+    for (auto _ : state) {
+        // Invalidate unified memory by writing to it from the host.
+        for (size_t i = 0; i < size; ++i) {
+            gpu_memory[i] = 0;
+        }
+        cudaDeviceSynchronize();
+
+        cudaEventRecord(start);
+        if (cudaStreamAttachMemAsync(0, gpu_memory, size, cudaMemAttachGlobal) != cudaSuccess) {
+            state.SkipWithError("Prefetch failed");
+            break;
+        }
+        gpuMemoryRead(gpu_memory, size);
+        cudaEventRecord(stop);
+        cudaEventSynchronize(stop);
+
+        float elapsed_ms = 0;
+        cudaEventElapsedTime(&elapsed_ms, start, stop);
+        state.SetIterationTime(elapsed_ms / 1000.0);
+    }
+
+    cudaDeviceSynchronize();
+    cudaFree(gpu_memory);
+    state.SetBytesProcessed(size * state.iterations());
+}
+
+BENCHMARK(BM_GPUUnifiedMemoryPrefetchRead)->RangeMultiplier(2)->Range(1<<20, 1<<24)->UseManualTime();
+
 BENCHMARK_MAIN();
